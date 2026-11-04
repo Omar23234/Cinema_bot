@@ -1,6 +1,8 @@
+
 import os
 import re
 import json
+import time
 import requests
 from playwright.sync_api import sync_playwright
 
@@ -25,24 +27,65 @@ def send_message(message):
 
 
 def get_showtimes():
+    last_error = None
+
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        page.goto(URL, wait_until="domcontentloaded", timeout=60000)
+        browser = p.chromium.launch(
+            headless=True,
+            args=["--disable-http2"]
+        )
 
-        # استنى تحميل مواعيد العرض
-        page.wait_for_timeout(10000)
+        try:
+            page = browser.new_page(
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/131.0.0.0 Safari/537.36"
+                )
+            )
 
-        text = page.locator("body").inner_text()
-        browser.close()
+            for attempt in range(3):
+                try:
+                    print(f"محاولة فتح VOX رقم {attempt + 1}")
 
-    # استخراج السطور التي تحتوي على مواعيد
+                    page.goto(
+                        URL,
+                        wait_until="domcontentloaded",
+                        timeout=60000
+                    )
+
+                    page.wait_for_timeout(10000)
+
+                    text = page.locator("body").inner_text()
+
+                    if "Avengers" not in text and "Doomsday" not in text:
+                        raise Exception("صفحة الفيلم لم تظهر بشكل صحيح")
+
+                    break
+
+                except Exception as e:
+                    last_error = e
+
+                    if attempt == 2:
+                        raise Exception(
+                            f"فشل فتح صفحة VOX بعد 3 محاولات: {last_error}"
+                        )
+
+                    time.sleep(5)
+
+        finally:
+            browser.close()
+
     times = set()
 
     for line in text.splitlines():
         line = " ".join(line.split())
 
-        if re.search(r"\b\d{1,2}:\d{2}\s*(?:AM|PM)?\b", line, re.I):
+        if re.search(
+            r"\b\d{1,2}:\d{2}\s*(?:AM|PM)?\b",
+            line,
+            re.I
+        ):
             if len(line) < 200:
                 times.add(line)
 
@@ -61,10 +104,11 @@ def main():
     else:
         old = set()
 
-    # أول تشغيل: حفظ المواعيد الحالية فقط
     if not old:
         with open(FILE, "w", encoding="utf-8") as f:
             json.dump(sorted(current), f, ensure_ascii=False)
+
+        print("تم حفظ المواعيد الحالية")
         return
 
     new_times = current - old
@@ -79,7 +123,8 @@ def main():
     with open(FILE, "w", encoding="utf-8") as f:
         json.dump(sorted(old | current), f, ensure_ascii=False)
 
+    print(f"تم فحص المواعيد. مواعيد جديدة: {len(new_times)}")
+
 
 if __name__ == "__main__":
     main()
-  
